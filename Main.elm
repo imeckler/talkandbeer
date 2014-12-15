@@ -25,6 +25,10 @@ nearestBeerSource e p = minimumOn (\s -> dist p s.pos) e.beerSources
 anti x = 1 - x
 
 baseSpeed = 1
+-- TODO: At every instance, the person should select their new goal
+-- via a utility calculation. Utility includes things like how turntocious
+-- they wish to become, how much time would be spent approaching the goal,
+-- how much they like certain individuals, etc.
 
 findPersonPos : State -> Int -> Maybe Pos
 findPersonPos s pid = Maybe.map (.pos) (Dict.get pid s.people)
