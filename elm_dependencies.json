@@ -1,0 +1,10 @@
+{ "version" : "0.1"
+, "summary" : "Party simulation"
+, "description" : "Party simulation"
+, "license" : "BSD3"
+, "repository" : "http://github.com/imeckler/party.git"
+, "exposed-modules" : [ "Main"]
+, "native-modules" : []
+, "elm-version": "0.14"
+, "dependencies" : {}
+}
