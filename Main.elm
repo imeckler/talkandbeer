@@ -1,5 +1,6 @@
 module Main where
 
+import Debug
 import Types(..)
 import Utils(..)
 import Draw
@@ -40,6 +41,59 @@ closePeople s p =
 
 newGoal k = {kind = k, age = 0}
 
+-- Sort of a differential equations model
+utility : Env -> State -> Person -> Goal -> (Float, Dir)
+utility e s p g =
+  case g.kind of
+    TalkTo q ->
+      let r = s.network ! p.idNum ! q.idNum
+          sat = p.socialSatiation ! q.idNum
+      in
+      ( socialConstant * abs r / (max 0.00001 (dist q.pos p.pos)^2) - sat
+      , sign r #* (q.pos #- p.pos)
+      )
+      -- ( socialConstant * (s.network ! p.idNum ! q.idNum) / (dist q.pos p.pos)^2, q.pos)
+    Drink ->
+      let src    = nearestBeerSource e p.pos
+          d      = dist src.pos p.pos - src.radius
+          desire = (p.predilection - p.turntocity)
+      in 
+      if | d > 0      -> (desire / d^2, src.pos #- p.pos)
+         | otherwise  -> (desire, {x=0,y=0})
+      {-
+    Avoid q ->
+      (-socialConstant * (s.network ! p.idNum ! q.idNum) / (dist q.pos p.pos)^2, q.pos)
+      -}
+
+-- I iterate many times over the pairs of people when doing an update for
+-- modularity. Consider merging into one pass if necessary.
+
+diff : Env -> State -> Person -> Pos
+diff =
+  let epsilon = 0.001 in
+  \e s p ->
+    let
+      talkUtility =
+        Dict.foldl (\_ q (u,x) ->
+          let (u',x') = utility e s p {kind=TalkTo q, age=0}
+          in
+          if | q.idNum == p.idNum -> (u, x)
+             | u' > u             -> (u', x')
+             | otherwise          -> (u, x))
+          (0, {x=0,y=0}) s.people
+      others = List.map (utility e s p) [{kind=Drink, age=0}]
+      dstDir = List.foldl (maxOn fst) talkUtility others |> snd
+    in
+    epsilon #* normed dstDir
+
+clampPerson : Env -> Person -> Person
+clampPerson e p =
+  let hw = toFloat (e.dims.w) / 2
+      hh = toFloat (e.dims.h) / 2
+  in
+  {p | pos <- {x=clamp -hw hw p.pos.x, y=clamp -hh hh p.pos.y}}
+
+{-
 updateGoal : State -> Person -> Person
 updateGoal s p = if p.goal.age < 1000 then p else if
   | p.turntocity - p.predilection > 0.5 -> {p | goal <- newGoal Drink}
@@ -47,11 +101,31 @@ updateGoal s p = if p.goal.age < 1000 then p else if
     let m               = s.network ! p.idNum
         friendishness q = m ! q.idNum
     in {p | goal <- newGoal (TalkTo (maximumOn friendishness (closePeople s p.pos)).idNum)}
-
+-}
 incrAge p = {p | age <- p.age + 1}
 
 stepPerson : Env -> State -> Person -> Maybe Person
 stepPerson =
+  let stepToGoal e s p = {p | pos <- p.pos #+ diff e s p}
+      areClose p q = dist p.pos q.pos < 3
+      satiate s p =
+        let sat =
+          List.filter (areClose p) (Dict.values s.people)
+          |> List.foldl (\q sat ->
+               Dict.update q.idNum (Just << ((+) 0.01) << Maybe.withDefault 0) sat)
+               p.socialSatiation
+        in
+        {p | socialSatiation <- sat}
+      turntocify e p =
+        if List.any (\src -> dist src.pos p.pos < src.radius) e.beerSources
+        then {p | turntocity <- min 1 (p.turntocity + 0.1)}
+        else p
+  in
+  \e s p ->
+    if isOld p && isUnhappy p
+    then Nothing
+    else Just (incrAge <| clampPerson e <| satiate s <| turntocify e <| stepToGoal e s p)
+  {-
   let stepToGoal e s p = case p.goal.kind of
     Drink ->
       let src   = nearestBeerSource e p.pos
@@ -62,15 +136,14 @@ stepPerson =
       then { p | turntocity <- min 1 (p.turntocity + 0.1) }
       else { p | pos <- p.pos #+ (speed #* dir) }
     TalkTo q -> p
-  in
-  \e s p ->
-    if isOld p && isUnhappy p
-    then Nothing
-    else Just (incrAge <| stepToGoal e s <| updateGoal s p)
+-}
 
 removeFromNetwork : PersonID -> Network -> Network
 removeFromNetwork pid n =
   Dict.remove pid n |> Dict.map (\_ d -> Dict.remove pid d)
+
+socialConstant : Float
+socialConstant = 1
 
 step : Env -> State -> State
 step e s0 = 
@@ -84,7 +157,7 @@ step e s0 =
 
 env : Env
 env =
-  { dims = {w = 200, h = 200}
+  { dims = {w = 800, h = 800}
   , beerSources =
       [ {pos = {x=20, y=20}, radius = 3}
       , {pos = {x=-60, y=-70}, radius = 3}
@@ -103,6 +176,7 @@ randomPerson = Random.customGenerator <| \s ->
   , age          = 0
   , goal         = { kind = Drink, age = 0 }
   , pos          = {x = x, y = y}
+  , socialSatiation = Dict.empty
   }
   , s'')
 
@@ -120,7 +194,7 @@ randThen g f = Random.customGenerator <| \seed ->
 randomNetwork : Int -> Random.Generator Network
 randomNetwork n =
   let enum = Dict.fromList << List.map2 (,) [0..(n-1)]
-      randomPrefs = rmap enum (Random.list n (Random.float 0 1))
+      randomPrefs = rmap enum (Random.list n (Random.float -1 1))
   in rmap enum (Random.list n randomPrefs)
 
 initialState : State
@@ -133,8 +207,8 @@ initialState =
                 people = Dict.fromList <| List.indexedMap (\i p -> (i, {p | idNum = i})) ps
               }
   in
-  fst <| Random.generate g (Random.initialSeed 0)
+  fst <| Random.generate g (Random.initialSeed 11)
 
 main : Signal Element
-main = Signal.map (Draw.draw env) (Signal.foldp (\_ -> step env) initialState (Time.fps 30))
+main = Signal.map (Draw.draw env) (Signal.foldp (\_ -> step env) initialState (Time.fps 60))
 
