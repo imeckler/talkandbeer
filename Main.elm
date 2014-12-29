@@ -46,14 +46,12 @@ utility : Env -> State -> Person -> Goal -> (Float, Dir)
 utility e s p g =
   case g.kind of
     TalkTo q ->
-      let r = s.network ! p.idNum ! q.idNum
-          sat = p.socialSatiation ! q.idNum
-      in
-      ( socialConstant * abs r / (max 0.00001 (dist q.pos p.pos)^2) - sat
-      , sign r #* (q.pos #- p.pos)
+      let f = s.network ! p.idNum ! q.idNum in
+      ( socialConstant * abs f / (max 0.00001 (dist q.pos p.pos)^2)
+      , sign f #* (q.pos #- p.pos)
       )
       -- ( socialConstant * (s.network ! p.idNum ! q.idNum) / (dist q.pos p.pos)^2, q.pos)
-    Drink ->
+    Drink    ->
       let src    = nearestBeerSource e p.pos
           d      = dist src.pos p.pos - src.radius
           desire = (p.predilection - p.turntocity)
@@ -64,9 +62,6 @@ utility e s p g =
     Avoid q ->
       (-socialConstant * (s.network ! p.idNum ! q.idNum) / (dist q.pos p.pos)^2, q.pos)
       -}
-
--- I iterate many times over the pairs of people when doing an update for
--- modularity. Consider merging into one pass if necessary.
 
 diff : Env -> State -> Person -> Pos
 diff =
@@ -85,6 +80,9 @@ diff =
       dstDir = List.foldl (maxOn fst) talkUtility others |> snd
     in
     epsilon #* normed dstDir
+
+clamp : comparable -> comparable -> comparable -> comparable
+clamp mi ma x = min ma (max mi x)
 
 clampPerson : Env -> Person -> Person
 clampPerson e p =
@@ -107,15 +105,6 @@ incrAge p = {p | age <- p.age + 1}
 stepPerson : Env -> State -> Person -> Maybe Person
 stepPerson =
   let stepToGoal e s p = {p | pos <- p.pos #+ diff e s p}
-      areClose p q = dist p.pos q.pos < 3
-      satiate s p =
-        let sat =
-          List.filter (areClose p) (Dict.values s.people)
-          |> List.foldl (\q sat ->
-               Dict.update q.idNum (Just << ((+) 0.01) << Maybe.withDefault 0) sat)
-               p.socialSatiation
-        in
-        {p | socialSatiation <- sat}
       turntocify e p =
         if List.any (\src -> dist src.pos p.pos < src.radius) e.beerSources
         then {p | turntocity <- min 1 (p.turntocity + 0.1)}
@@ -124,7 +113,7 @@ stepPerson =
   \e s p ->
     if isOld p && isUnhappy p
     then Nothing
-    else Just (incrAge <| clampPerson e <| satiate s <| turntocify e <| stepToGoal e s p)
+    else Just (incrAge <| clampPerson e <| turntocify e <| stepToGoal e s p)
   {-
   let stepToGoal e s p = case p.goal.kind of
     Drink ->
@@ -176,7 +165,6 @@ randomPerson = Random.customGenerator <| \s ->
   , age          = 0
   , goal         = { kind = Drink, age = 0 }
   , pos          = {x = x, y = y}
-  , socialSatiation = Dict.empty
   }
   , s'')
 
@@ -207,7 +195,7 @@ initialState =
                 people = Dict.fromList <| List.indexedMap (\i p -> (i, {p | idNum = i})) ps
               }
   in
-  fst <| Random.generate g (Random.initialSeed 11)
+  fst <| Random.generate g (Random.initialSeed 10)
 
 main : Signal Element
 main = Signal.map (Draw.draw env) (Signal.foldp (\_ -> step env) initialState (Time.fps 60))
