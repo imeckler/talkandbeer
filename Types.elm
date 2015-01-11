@@ -16,18 +16,17 @@ type GoalKind
 type alias Goal = { kind : GoalKind, age : Int }
 
 type alias Person =
-  { turntocity   : Float
-  , predilection : Float
+  { turntocity      : Float
+  , predilection    : Float
   -- Turns out happiness is just a floating point number
-  , happiness    : Float
+  , happiness       : Float
   -- How many ticks they've been at the party for
-  , age          : Int
-  , goal         : Goal
-  , idNum        : PersonID
-  , pos          : Pos
+  , age             : Int
+  , socialSatiation : Dict Int Float
+  , goal            : Goal
+  , idNum           : PersonID
+  , pos             : Pos
   }
-
-type alias Relationship = { like : Float, satiation : Float }
 
 type alias Network = Dict Int (Dict Int Float)
 
